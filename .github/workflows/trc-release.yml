@@ -15,20 +15,27 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      # upstream's binaries_release1.yml large-disk build, with the tag as COMMIT so `weed version` shows it
+      # Upstream's large-disk builds, with the tag as COMMIT so `weed version` shows it: plain from binaries_release1.yml, full (all optional backends, rclone among them) from binaries_release4.yml.
       - name: Build
         working-directory: weed
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: amd64
-        run: go build -tags 5BytesOffset -ldflags "-s -w -extldflags -static -X github.com/seaweedfs/seaweedfs/weed/util/version.COMMIT=${GITHUB_REF_NAME}" -o "$RUNNER_TEMP/weed" .
+        run: |
+          ldflags="-s -w -extldflags -static -X github.com/seaweedfs/seaweedfs/weed/util/version.COMMIT=${GITHUB_REF_NAME}"
+          go build -tags 5BytesOffset -ldflags "$ldflags" -o "$RUNNER_TEMP/large_disk/weed" .
+          go build -tags 5BytesOffset,elastic,gocdk,rclone,sqlite,tarantool,tikv,ydb -ldflags "$ldflags" -o "$RUNNER_TEMP/full_large_disk/weed" .
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tar -czf linux_amd64_large_disk.tar.gz -C "$RUNNER_TEMP" weed
-          sha256sum linux_amd64_large_disk.tar.gz > linux_amd64_large_disk.tar.gz.sha256
-          gh release create "$GITHUB_REF_NAME" linux_amd64_large_disk.tar.gz linux_amd64_large_disk.tar.gz.sha256 \
+          assets=()
+          for v in large_disk full_large_disk; do
+            tar -czf "linux_amd64_$v.tar.gz" -C "$RUNNER_TEMP/$v" weed
+            sha256sum "linux_amd64_$v.tar.gz" > "linux_amd64_$v.tar.gz.sha256"
+            assets+=("linux_amd64_$v.tar.gz" "linux_amd64_$v.tar.gz.sha256")
+          done
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
             --verify-tag --title "$GITHUB_REF_NAME" --notes "Upstream ${GITHUB_REF_NAME%-trc.*} plus the patches in [TRC-PATCHES.md](https://github.com/${GH_REPO}/blob/${GITHUB_REF_NAME}/TRC-PATCHES.md)."

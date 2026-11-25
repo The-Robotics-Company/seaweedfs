@@ -12,7 +12,14 @@ When a patch is merged upstream, drop it at the next rebase onto a release that 
 
 ## Releases
 
-Tags are `<upstream version>-trc.<n>`, for example `4.55-trc.1`. Pushing one runs `.github/workflows/trc-release.yml`, which builds `weed` as upstream's large-disk Linux amd64 release does and publishes `linux_amd64_large_disk.tar.gz` (the `weed` binary at the archive root, like upstream's) and its `.sha256`. The build sets `version.COMMIT` to the tag, so `weed version` prints it, for example `version 8000GB 4.55 4.55-trc.1 linux amd64`.
+Tags are `<upstream version>-trc.<n>`, for example `4.55-trc.1`. Pushing one runs `.github/workflows/trc-release.yml`, which builds `weed` as the large-disk Linux amd64 releases from upstream do and publishes, each with its `.sha256`:
+
+| Asset | Build tags | Use |
+| --- | --- | --- |
+| `linux_amd64_large_disk.tar.gz` | `5BytesOffset` | mounts |
+| `linux_amd64_full_large_disk.tar.gz` | `5BytesOffset,elastic,gocdk,rclone,sqlite,tarantool,tikv,ydb` | servers: only this build carries the rclone tier backend |
+
+Each archive holds the `weed` binary at its root, like the upstream archives. The build sets `version.COMMIT` to the tag, so `weed version` prints it, for example `version 8000GB 4.55 4.55-trc.1 linux amd64`.
 
 ## Moving to a new upstream release
 
