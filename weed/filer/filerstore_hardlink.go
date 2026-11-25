@@ -84,6 +84,9 @@ func (fsw *FilerStoreWrapper) setHardLink(ctx context.Context, entry *Entry) err
 	return fsw.KvPut(ctx, key, newBlob)
 }
 
+// maybeReadHardLink fills a hard-linked entry from the record its links share.
+// Without a record it keeps the entry's own copy; any other error is returned,
+// since that copy can be stale and would be written back over the record.
 func (fsw *FilerStoreWrapper) maybeReadHardLink(ctx context.Context, entry *Entry) error {
 	if len(entry.HardLinkId) == 0 {
 		return nil
@@ -93,12 +96,12 @@ func (fsw *FilerStoreWrapper) maybeReadHardLink(ctx context.Context, entry *Entr
 	glog.V(1).InfofCtx(ctx, "maybeReadHardLink %s HardLinkId %x", entry.FullPath, entry.HardLinkId)
 
 	value, err := fsw.KvGet(ctx, key)
+	if errors.Is(err, ErrKvNotFound) {
+		glog.V(4).InfofCtx(ctx, "maybeReadHardLink %s HardLinkId %x: not found", entry.FullPath, entry.HardLinkId)
+		return nil
+	}
 	if err != nil {
-		if errors.Is(err, ErrKvNotFound) {
-			glog.V(4).InfofCtx(ctx, "maybeReadHardLink %s HardLinkId %x: not found", entry.FullPath, entry.HardLinkId)
-		} else {
-			glog.ErrorfCtx(ctx, "read %s HardLinkId %x: %v", entry.FullPath, entry.HardLinkId, err)
-		}
+		glog.ErrorfCtx(ctx, "read %s HardLinkId %x: %v", entry.FullPath, entry.HardLinkId, err)
 		return err
 	}
 

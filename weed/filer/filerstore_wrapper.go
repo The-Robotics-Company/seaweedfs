@@ -345,7 +345,9 @@ func (fsw *FilerStoreWrapper) ListDirectoryEntries(ctx context.Context, dirPath 
 
 	// glog.V(4).Infof("ListDirectoryEntries %s from %s limit %d", dirPath, startFileName, limit)
 	return actualStore.ListDirectoryEntries(ctx, dirPath, startFileName, includeStartFile, limit, func(entry *Entry) (bool, error) {
-		fsw.maybeReadHardLink(ctx, entry)
+		if err := fsw.maybeReadHardLink(ctx, entry); err != nil {
+			return false, err
+		}
 		filer_pb.AfterEntryDeserialization(entry.GetChunks())
 		return eachEntryFunc(entry)
 	})
@@ -364,7 +366,9 @@ func (fsw *FilerStoreWrapper) ListDirectoryPrefixedEntries(ctx context.Context, 
 	}
 	// glog.V(4).Infof("ListDirectoryPrefixedEntries %s from %s prefix %s limit %d", dirPath, startFileName, prefix, limit)
 	adjustedEntryFunc := func(entry *Entry) (bool, error) {
-		fsw.maybeReadHardLink(ctx, entry)
+		if err := fsw.maybeReadHardLink(ctx, entry); err != nil {
+			return false, err
+		}
 		filer_pb.AfterEntryDeserialization(entry.GetChunks())
 		return eachEntryFunc(entry)
 	}
@@ -394,7 +398,7 @@ func (fsw *FilerStoreWrapper) ScanEntries(ctx context.Context, dirPath util.Full
 		stats.FilerStoreHistogram.WithLabelValues(fsw.defaultStore.GetName(), "scan").Observe(time.Since(start).Seconds())
 	}()
 	return scanner.ScanEntries(ctx, dirPath, func(scanCtx context.Context, entry *Entry) error {
-		if err := fsw.maybeReadHardLink(scanCtx, entry); err != nil && !errors.Is(err, ErrKvNotFound) {
+		if err := fsw.maybeReadHardLink(scanCtx, entry); err != nil {
 			return fmt.Errorf("resolve hard link of %s: %w", entry.FullPath, err)
 		}
 		filer_pb.AfterEntryDeserialization(entry.GetChunks())
