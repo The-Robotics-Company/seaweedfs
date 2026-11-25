@@ -437,17 +437,10 @@ func (store *AbstractSqlStore) ListDirectoryPrefixedEntries(ctx context.Context,
 	}
 	defer rows.Close()
 
-	// A transaction runs on one connection, which cannot serve the callback's
-	// own queries (a hard link's KvGet) while these rows are open on it: in one,
-	// read the rows first and call back once they are closed.
-	var held []*filer.Entry
-	callback := eachEntryFunc
-	if _, inTx := db.(*sql.Tx); inTx {
-		callback = func(entry *filer.Entry) (bool, error) {
-			held = append(held, entry)
-			return true, nil
-		}
-	}
+	// A transaction has one connection, and the callback may query on it (a
+	// hard link's KvGet), so its entries are handed over after the rows close.
+	_, inTx := db.(*sql.Tx)
+	var entries []*filer.Entry
 
 	stoppedEarly := false
 	for rows.Next() {
@@ -467,7 +460,12 @@ func (store *AbstractSqlStore) ListDirectoryPrefixedEntries(ctx context.Context,
 			return lastFileName, fmt.Errorf("scan decode %s : %v", entry.FullPath, err)
 		}
 
-		resEachEntryFunc, resEachEntryFuncErr := callback(entry)
+		if inTx {
+			entries = append(entries, entry)
+			continue
+		}
+
+		resEachEntryFunc, resEachEntryFuncErr := eachEntryFunc(entry)
 		if resEachEntryFuncErr != nil {
 			err = fmt.Errorf("failed to process eachEntryFunc: %w", resEachEntryFuncErr)
 			break
@@ -488,18 +486,18 @@ func (store *AbstractSqlStore) ListDirectoryPrefixedEntries(ctx context.Context,
 			err = fmt.Errorf("list %s: %w", dirPath, rowsErr)
 		}
 	}
-	if err != nil || len(held) == 0 {
+	if err != nil {
 		return lastFileName, err
 	}
 
 	rows.Close()
-	for _, entry := range held {
+	for _, entry := range entries {
 		lastFileName = entry.Name()
-		more, eachErr := eachEntryFunc(entry)
-		if eachErr != nil {
-			return lastFileName, fmt.Errorf("failed to process eachEntryFunc: %w", eachErr)
+		resEachEntryFunc, resEachEntryFuncErr := eachEntryFunc(entry)
+		if resEachEntryFuncErr != nil {
+			return lastFileName, fmt.Errorf("failed to process eachEntryFunc: %w", resEachEntryFuncErr)
 		}
-		if !more {
+		if !resEachEntryFunc {
 			break
 		}
 	}

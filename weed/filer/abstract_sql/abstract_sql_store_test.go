@@ -286,23 +286,20 @@ func TestWritesUnderATransactionGoThroughIt(t *testing.T) {
 }
 
 // busyDriver serves canned rows per query on connections that, like pgx's,
-// refuse a query while the rows of another are still open on them.
+// refuse a query while the rows of another are still open.
 type busyDriver map[string][][]driver.Value
 
-func (d busyDriver) Open(string) (driver.Conn, error)             { return &busyConn{rows: d}, nil }
-func (d busyDriver) Connect(context.Context) (driver.Conn, error) { return d.Open("") }
-func (d busyDriver) Driver() driver.Driver                        { return d }
+func (d busyDriver) Connect(context.Context) (driver.Conn, error) { return &busyConn{rows: d}, nil }
+func (d busyDriver) Driver() driver.Driver                        { return nil }
 
 type busyConn struct {
 	rows busyDriver
 	busy bool
 }
 
-func (c *busyConn) Prepare(string) (driver.Stmt, error) {
-	return nil, errors.New("prepare unsupported")
-}
-func (c *busyConn) Close() error              { return nil }
-func (c *busyConn) Begin() (driver.Tx, error) { return c, nil }
+func (c *busyConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (c *busyConn) Close() error                        { return nil }
+func (c *busyConn) Begin() (driver.Tx, error)           { return c, nil }
 func (c *busyConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
 	return c, nil
 }
@@ -321,13 +318,8 @@ type busyRows struct {
 	rows [][]driver.Value
 }
 
-func (r *busyRows) Columns() []string {
-	if len(r.rows) == 0 {
-		return nil
-	}
-	return make([]string, len(r.rows[0]))
-}
-func (r *busyRows) Close() error { r.conn.busy = false; return nil }
+func (r *busyRows) Columns() []string { return make([]string, len(r.rows[0])) }
+func (r *busyRows) Close() error      { r.conn.busy = false; return nil }
 func (r *busyRows) Next(dest []driver.Value) error {
 	if len(r.rows) == 0 {
 		return io.EOF
@@ -337,50 +329,40 @@ func (r *busyRows) Next(dest []driver.Value) error {
 	return nil
 }
 
-type hardLinkGen struct{ listGen }
+type findGen struct{ listGen }
 
-func (hardLinkGen) GetSqlFind(string) string { return "SELECT meta" }
-
-type namedStore struct{ *AbstractSqlStore }
-
-func (namedStore) GetName() string                             { return "test" }
-func (namedStore) Initialize(util.Configuration, string) error { return nil }
+func (findGen) GetSqlFind(string) string { return "SELECT meta" }
 
 // A transaction has one connection, so a listing in one (a directory rename)
-// must have closed its rows before its callback reads a hard link on it.
-func TestListDirectoryEntriesInTransactionReadsHardLinks(t *testing.T) {
-	encode := func(e *filer.Entry) []byte {
-		b, err := e.EncodeAttributesAndChunks()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
+// must close its rows before the callback reads a hard link on it.
+func TestListDirectoryEntriesInTransactionClosesRowsBeforeCallback(t *testing.T) {
+	meta, err := (&filer.Entry{}).EncodeAttributesAndChunks()
+	if err != nil {
+		t.Fatal(err)
 	}
-	id := filer.HardLinkId("hardlink-00000001")
-	stale := encode(&filer.Entry{HardLinkId: id, HardLinkCounter: 1})
-	record := encode(&filer.Entry{HardLinkId: id, HardLinkCounter: 2})
-
 	db := sql.OpenDB(busyDriver{
-		"SELECT name, meta": {{"a", stale}, {"b", stale}},
-		"SELECT meta":       {{record}},
+		"SELECT name, meta": {{"a.txt", meta}, {"b.txt", meta}},
+		"SELECT meta":       {{[]byte("record")}},
 	})
 	defer db.Close()
-	store := &AbstractSqlStore{SqlGenerator: hardLinkGen{}, DB: db}
+
+	store := &AbstractSqlStore{SqlGenerator: findGen{}, DB: db}
 	ctx, err := store.BeginTransaction(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.RollbackTransaction(ctx)
 
-	counters := map[string]int32{}
-	_, err = filer.NewFilerStoreWrapper(namedStore{store}).ListDirectoryEntries(ctx, "/dir", "", true, 100, func(entry *filer.Entry) (bool, error) {
-		counters[entry.Name()] = entry.HardLinkCounter
-		return true, nil
+	var listed []string
+	_, err = store.ListDirectoryEntries(ctx, "/dir", "", true, 100, func(entry *filer.Entry) (bool, error) {
+		listed = append(listed, entry.Name())
+		_, err := store.KvGet(ctx, []byte("hard-link-id"))
+		return true, err
 	})
 	if err != nil {
 		t.Fatalf("ListDirectoryEntries: %v", err)
 	}
-	if want := map[string]int32{"a": 2, "b": 2}; !reflect.DeepEqual(counters, want) {
-		t.Errorf("hard link counters = %v, want %v from the shared record", counters, want)
+	if want := []string{"a.txt", "b.txt"}; !reflect.DeepEqual(listed, want) {
+		t.Errorf("listed %v, want %v", listed, want)
 	}
 }

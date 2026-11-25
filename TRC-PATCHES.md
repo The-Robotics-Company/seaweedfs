@@ -1,12 +1,12 @@
 # TRC patches
 
-`trc` is an upstream release tag plus the patches below, one commit each, then the commit that adds this file and the `trc-*` workflows. `master` mirrors upstream and is never changed by hand. Each patch is also on a `fix/<name>` branch cut from upstream `master`, for its upstream PR.
+`trc` (the default branch) is an upstream release tag plus the patches below. It changes only through pull requests: the organization's base ruleset forbids force-pushes to default branches. `master` mirrors upstream and is never changed by hand. Each patch is also on a `fix/<name>` branch cut from upstream `master`, for its upstream PR.
 
 Base: upstream `4.55`.
 
 | Patch | Branch | Upstream PR | Status |
 |---|---|---|---|
-| fix(filer): hard-link dir rename on SQL stores | `fix/hardlink-dir-rename` | not opened yet | carried |
+| filer: rename a directory that holds a hard link on SQL stores | `fix/hardlink-dir-rename` | [#13001](https://github.com/seaweedfs/seaweedfs/pull/13001) | carried |
 
 When a patch is merged upstream, drop it at the next rebase onto a release that contains it and mark it merged here.
 
@@ -19,5 +19,5 @@ Tags are `<upstream version>-trc.<n>`, for example `4.55-trc.1`. Pushing one run
 `.github/workflows/trc-upstream-sync.yml` fast-forwards `master` weekly and opens an issue when upstream publishes a release whose tag is not in this repo yet. Then:
 
 1. `git fetch upstream tag <ver>` and `git push origin <ver>`.
-2. `git rebase --onto <ver> <old ver> trc`, dropping patches upstream merged, and update the base and table above.
-3. Push `trc` (with `--force-with-lease`) and tag `<ver>-trc.1`.
+2. On a branch from `trc`, `git merge <ver>`; for each patch upstream merged, keep upstream's version in conflicts, and update the base and table above.
+3. Open a pull request into `trc`, merge it, and tag the merge commit `<ver>-trc.1`.
