@@ -42,6 +42,28 @@ func (vs *VolumeServer) replicaContentMd5(n *needle.Needle, contentMd5 string) s
 	return contentMd5
 }
 
+// replicaJwt returns the source of the write JWT a replica forward carries,
+// called right before each replica request. Reading the body can outlast the
+// incoming JWT, so with a signing key every forward gets a fresh JWT for the
+// base file ID, which the request was already authorized for. Without a
+// signing key the incoming JWT passes through unchanged.
+func (vs *VolumeServer) replicaJwt(r *http.Request, vid, fid string, signingKey security.SigningKey) func() security.EncodedJwt {
+	if len(signingKey) == 0 {
+		incoming := security.GetJwt(r)
+		return func() security.EncodedJwt { return incoming }
+	}
+	fileId := vid + "," + baseFid(fid)
+	return func() security.EncodedJwt {
+		// Minting unconditionally, rather than forwarding a still-valid incoming
+		// JWT, keeps a forward from carrying one that expires in flight. The cost
+		// falls on key rotation: replicas verify a JWT signed with the key current
+		// on this server, so a new write signing key must be present as
+		// previous_key (verify-only) on every volume server before any volume
+		// server makes the new key current.
+		return security.GenJwtForVolumeServer(signingKey, vs.guard.ExpiresAfterSec(), fileId)
+	}
+}
+
 func (vs *VolumeServer) PostHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if e := r.ParseForm(); e != nil {
@@ -67,11 +89,7 @@ func (vs *VolumeServer) PostHandler(w http.ResponseWriter, r *http.Request) {
 		// and status precedence for other content types, which get no retry marker.
 		contentType, _, typeErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if typeErr == nil && contentType == "multipart/form-data" {
-			baseFid := fid
-			if sep := strings.LastIndex(baseFid, "_"); sep > 0 {
-				baseFid = baseFid[:sep]
-			}
-			if security.IsExpiredVolumeJwt(writeSigningKey, security.GetJwt(r), vid+","+baseFid, previousWriteSigningKey) {
+			if security.IsExpiredVolumeJwt(writeSigningKey, security.GetJwt(r), vid+","+baseFid(fid), previousWriteSigningKey) {
 				w.Header().Set(util_http.WriteOutcomeHeader, util_http.WriteOutcomeExpiredJwtBeforeAppend)
 			}
 		}
@@ -91,7 +109,7 @@ func (vs *VolumeServer) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	ret := operation.UploadResult{}
 	// use context.WithoutCancel to avoid context cancellation when the client connection is closed
-	isUnchanged, writeError := topology.ReplicatedWrite(context.WithoutCancel(ctx), vs.GetMaster, vs.grpcDialOption, vs.store, volumeId, reqNeedle, r, vs.replicaContentMd5(reqNeedle, contentMd5))
+	isUnchanged, writeError := topology.ReplicatedWrite(context.WithoutCancel(ctx), vs.GetMaster, vs.grpcDialOption, vs.store, volumeId, reqNeedle, r, vs.replicaJwt(r, vid, fid, writeSigningKey), vs.replicaContentMd5(reqNeedle, contentMd5))
 	if writeError != nil {
 		stats.VolumeServerFileWriteFailures.Inc()
 		status := http.StatusInternalServerError
