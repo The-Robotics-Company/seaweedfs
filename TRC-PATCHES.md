@@ -6,7 +6,7 @@ Base: upstream `4.55`.
 
 | Patch | Branch | Upstream PR | Status | Notes |
 |---|---|---|---|---|
-| filer: rename a directory that holds a hard link on SQL stores | `fix/hardlink-dir-rename` | [#13001](https://github.com/seaweedfs/seaweedfs/pull/13001) | carried | |
+| filer: rename a directory that holds a hard link on SQL stores | `fix/hardlink-dir-rename` | [#13001](https://github.com/seaweedfs/seaweedfs/pull/13001) | merged upstream (e13f362); drop on the next upstream release |
 | volume, operation: refresh the write JWT for replica forwards and filer-proxy retries | `fix/replica-jwt-refresh` | [#13028](https://github.com/seaweedfs/seaweedfs/pull/13028) | carried | The volume-server half is load-bearing: a write is fixed only once its primary volume server runs the patch; the mount half alone does not fix it. Strato keeps its 60 s write JWT expiry regardless. Key rotation: a new write signing key must be present as `previous_key` (verify-only) on every volume server before any volume server makes it current, since replicas verify forward JWTs minted with the current key of the primary. |
 
 When a patch is merged upstream, drop it at the next rebase onto a release that contains it and mark it merged here.
