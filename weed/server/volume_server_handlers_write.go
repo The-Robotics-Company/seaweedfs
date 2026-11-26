@@ -42,6 +42,19 @@ func (vs *VolumeServer) replicaContentMd5(n *needle.Needle, contentMd5 string) s
 	return contentMd5
 }
 
+// replicaJwt is the write JWT a replica forward carries. Reading the body can
+// outlast the incoming JWT, so with a signing key the forward gets a fresh one
+// for the same file ID, which the request was already authorized for.
+func (vs *VolumeServer) replicaJwt(r *http.Request, vid, fid string, signingKey security.SigningKey) security.EncodedJwt {
+	if len(signingKey) == 0 {
+		return security.GetJwt(r)
+	}
+	if sep := strings.LastIndex(fid, "_"); sep > 0 {
+		fid = fid[:sep]
+	}
+	return security.GenJwtForVolumeServer(signingKey, vs.guard.ExpiresAfterSec(), vid+","+fid)
+}
+
 func (vs *VolumeServer) PostHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if e := r.ParseForm(); e != nil {
@@ -91,7 +104,7 @@ func (vs *VolumeServer) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	ret := operation.UploadResult{}
 	// use context.WithoutCancel to avoid context cancellation when the client connection is closed
-	isUnchanged, writeError := topology.ReplicatedWrite(context.WithoutCancel(ctx), vs.GetMaster, vs.grpcDialOption, vs.store, volumeId, reqNeedle, r, vs.replicaContentMd5(reqNeedle, contentMd5))
+	isUnchanged, writeError := topology.ReplicatedWrite(context.WithoutCancel(ctx), vs.GetMaster, vs.grpcDialOption, vs.store, volumeId, reqNeedle, r, vs.replicaJwt(r, vid, fid, writeSigningKey), vs.replicaContentMd5(reqNeedle, contentMd5))
 	if writeError != nil {
 		stats.VolumeServerFileWriteFailures.Inc()
 		status := http.StatusInternalServerError

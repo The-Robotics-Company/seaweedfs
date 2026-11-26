@@ -7,6 +7,7 @@ Base: upstream `4.55`.
 | Patch | Branch | Upstream PR | Status |
 |---|---|---|---|
 | filer: rename a directory that holds a hard link on SQL stores | `fix/hardlink-dir-rename` | [#13001](https://github.com/seaweedfs/seaweedfs/pull/13001) | carried |
+| volume, operation: refresh the write JWT for replica forwards and filer-proxy retries | `fix/replica-jwt-refresh` | [#13028](https://github.com/seaweedfs/seaweedfs/pull/13028) | carried |
 
 When a patch is merged upstream, drop it at the next rebase onto a release that contains it and mark it merged here.
 
