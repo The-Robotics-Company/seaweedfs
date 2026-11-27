@@ -37,5 +37,8 @@ jobs:
             sha256sum "linux_amd64_$v.tar.gz" > "linux_amd64_$v.tar.gz.sha256"
             assets+=("linux_amd64_$v.tar.gz" "linux_amd64_$v.tar.gz.sha256")
           done
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+          # A tag with a suffix after -trc.<n> (e.g. 4.55-trc.3-exp1) is an experiment build: a prerelease, never latest.
+          pre=()
+          [[ $GITHUB_REF_NAME =~ -trc\.[0-9]+$ ]] || pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" "${pre[@]}" \
             --verify-tag --title "$GITHUB_REF_NAME" --notes "Upstream ${GITHUB_REF_NAME%-trc.*} plus the patches in [TRC-PATCHES.md](https://github.com/${GH_REPO}/blob/${GITHUB_REF_NAME}/TRC-PATCHES.md)."
