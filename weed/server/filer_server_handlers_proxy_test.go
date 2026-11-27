@@ -32,6 +32,7 @@ type proxyTestVolume struct {
 	auth         atomic.Value // string
 	effectiveJwt atomic.Value // string
 	rawQuery     atomic.Value // string
+	length       atomic.Int64
 }
 
 func newProxyTestVolume(t *testing.T) *proxyTestVolume {
@@ -44,6 +45,7 @@ func newProxyTestVolume(t *testing.T) *proxyTestVolume {
 		v.hits.Add(1)
 		v.auth.Store(r.Header.Get("Authorization"))
 		v.rawQuery.Store(r.URL.RawQuery)
+		v.length.Store(r.ContentLength)
 		// The credential the volume server would actually evaluate, which is not
 		// necessarily the Authorization header.
 		v.effectiveJwt.Store(string(security.GetJwt(r)))
@@ -138,6 +140,22 @@ func TestProxyWriteDropsCallerJwtQueryParam(t *testing.T) {
 		security.EncodedJwt(volume.seenEffectiveJwt()), claims); err != nil {
 		t.Fatalf("volume server would evaluate %q, which does not validate against the write key: %v",
 			volume.seenEffectiveJwt(), err)
+	}
+}
+
+// The volume server admits an upload by its Content-Length; a body relayed
+// without one arrives chunked and is admitted as zero bytes.
+func TestProxyWriteForwardsContentLength(t *testing.T) {
+	volume := newProxyTestVolume(t)
+	fs := &FilerServer{volumeGuard: security.NewGuard([]string{}, "", 0, "", 0, "", "")}
+
+	body := strings.Repeat("x", 4096)
+	r := httptest.NewRequest(http.MethodPost, "http://filer:8888/?proxyChunkId="+proxyTestFileId, strings.NewReader(body))
+	fs.proxyToVolumeServerURL(httptest.NewRecorder(), r, proxyTestFileId, volume.URL+"/"+proxyTestFileId)
+
+	volume.requireReached(t)
+	if got := volume.length.Load(); got != int64(len(body)) {
+		t.Fatalf("volume server saw Content-Length %d, want %d", got, len(body))
 	}
 }
 

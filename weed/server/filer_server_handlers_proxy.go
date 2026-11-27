@@ -143,6 +143,10 @@ func (fs *FilerServer) proxyToVolumeServerURL(w http.ResponseWriter, r *http.Req
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	// NewRequest cannot size r.Body and the transport ignores a copied
+	// Content-Length header: without this the upload goes out chunked and the
+	// volume server's upload limit admits it as zero bytes.
+	proxyReq.ContentLength = r.ContentLength
 
 	// Limit concurrent reads per volume server to prevent overload. Writes are
 	// deliberately exempt: the bursts this exists to contain are replication
